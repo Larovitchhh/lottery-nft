@@ -1,24 +1,20 @@
 ;; lottery-nft.clar
-;; Definir el estándar SIP-009 (puedes importarlo o definir el trait)
-(use-trait nft-trait 'SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.nft-trait.nft-trait)
-
+;; Definición del NFT
 (define-non-fungible-token lucky-number uint)
 
 ;; Variables de estado
 (define-data-var last-token-id uint u0)
-(define-map token-numbers uint uint) ;; ID del NFT -> Número (000-999)
+(define-map token-numbers uint uint)
 
-;; Errores
-(define-constant ERR-NOT-AUTHORIZED (err u100))
-
-;; Lógica de "Aleatoriedad" (Pseudo-random)
+;; Función privada para generar el número (000-999)
 (define-private (generate-lucky-number)
     (let (
-        (block-hash (default-to 0x00 (get-block-info? header-hash (- block-height u1))))
-        (hash (sha256 (concat block-hash (unwrap-panic (to-consensus-buff? tx-sender)))))
+        ;; Usamos el ID actual y el tx-sender para la semilla
+        (seed (sha256 (concat (unwrap-panic (to-consensus-buff? (var-get last-token-id))) (unwrap-panic (to-consensus-buff? tx-sender)))))
     )
-    ;; Obtenemos el módulo 1000 para que sea entre 0 y 999
-    (mod (buff-to-uint-le (slice? hash u0 u4)) u1000))
+    ;; Convertimos los primeros bytes del hash en un número y aplicamos módulo 1000
+    (mod (buff-to-uint-le (unwrap-panic (slice? seed u0 u4))) u1000)
+    )
 )
 
 ;; Función pública para mintear
@@ -28,17 +24,24 @@
         (lucky-num (generate-lucky-number))
     )
     (begin
-        ;; Mintear el NFT al sender
+        ;; Intentar el minteo
         (try! (nft-mint? lucky-number new-id tx-sender))
-        ;; Guardar el número asociado a ese ID
+        ;; Guardar el número de la suerte en el mapa
         (map-set token-numbers new-id lucky-num)
-        ;; Actualizar el contador
+        ;; Actualizar el contador de IDs
         (var-set last-token-id new-id)
-        (ok new-id))
+        ;; Devolvemos el número obtenido en el NFT
+        (ok lucky-num)
+    )
     )
 )
 
-;; Read-only: Consultar el número de un NFT
-(define-read-only (get-number-of (token-id uint))
-    (ok (map-get? token-numbers token-id))
+;; Función de lectura para ver qué número le tocó a un NFT
+(define-read-only (get-lucky-number (id uint))
+    (ok (map-get? token-numbers id))
+)
+
+;; Función para saber quién es el dueño (estándar básico)
+(define-read-only (get-owner (id uint))
+    (ok (nft-get-owner? lucky-number id))
 )
